@@ -69,12 +69,11 @@ object DynVerPlugin extends AutoPlugin {
     isSnapshot := dynverGitDescribeOutput.value.isSnapshot,
     isVersionStable := dynverGitDescribeOutput.value.isVersionStable,
     previousStableVersion := dynverGitPreviousStableVersion.value.previousVersion,
-    dynverTagPrefix := "",
+    dynverTagPrefix := { if (dynverVTagPrefix.value) "v" else "" },
     dynverCurrentDate := new Date,
     dynverInstance := DynVer(
       Some(buildBase.value),
       dynverSeparator.value,
-      dynverVTagPrefix.value,
       dynverTagPrefix.value
     ),
     dynverGitDescribeOutput := dynverInstance.value
@@ -82,7 +81,7 @@ object DynVerPlugin extends AutoPlugin {
     dynverSonatypeSnapshots := false,
     dynverGitPreviousStableVersion := dynverInstance.value.getGitPreviousStableTag,
     dynverSeparator := DynVer.separator,
-    dynverVTagPrefix := DynVer.vTagPrefix,
+    dynverVTagPrefix := DynVer.prefix == "v",
     dynver := {
       val dynver = dynverInstance.value
       if (dynverSonatypeSnapshots.value) dynver.sonatypeVersion(new Date)
@@ -171,9 +170,9 @@ object GitDescribeOutput
   private val CommitSuffix = s"""($Distance-$Sha)""".r
   private val TstampSuffix = """(\+[0-9]{8}-[0-9]{4})""".r
 
-  private[sbtdynver] final class Parser(vTagPrefix: Boolean) {
+  private[sbtdynver] final class Parser(prefix: String) {
     private val Tag =
-      (if (vTagPrefix) """(v[0-9][^+]*?)""" else """([0-9]+\.[^+]*?)""").r
+      s"""($prefix[0-9][^+]*?)""".r
 
     private val FromTag =
       s"""^$OptWs$Tag$CommitSuffix?$TstampSuffix?$OptWs$$""".r
@@ -187,7 +186,7 @@ object GitDescribeOutput
     }
 
     // If tags aren't v-prefixed, add the v back, so the rest of dynver works (e.g. GitRef#isTag)
-    private def v(s: String) = if (vTagPrefix) s else s"v$s"
+    private def v(s: String) = s"$prefix$s"
 
     private def parse0(ref: String,
                        dist: String,
@@ -234,16 +233,13 @@ object GitDescribeOutput
 }
 
 // sealed just so the companion object can extend it. Shouldn't've been a case class.
-sealed case class DynVer(wd: Option[File],
-                         separator: String,
-                         vTagPrefix: Boolean,
-                         prefix: String) {
+sealed case class DynVer(wd: Option[File], separator: String, prefix: String) {
   private def this(wd: Option[File], separator: String) =
-    this(wd, separator, true)
+    this(wd, separator, "v")
   private def this(wd: Option[File]) = this(wd, "+")
 
-  private val TagPattern = if (vTagPrefix) "v[0-9]*" else "[0-9]*"
-  private[sbtdynver] val parser = new GitDescribeOutput.Parser(vTagPrefix)
+  private val TagPattern = s"$prefix[0-9]*"
+  private[sbtdynver] val parser = new GitDescribeOutput.Parser(prefix)
 
   def version(d: Date): String =
     getGitDescribeOutput(d).versionWithSep(d, separator)
@@ -313,8 +309,8 @@ sealed case class DynVer(wd: Option[File],
   def copy(wd: Option[File] = wd): DynVer = new DynVer(wd, separator)
 }
 
-object DynVer extends DynVer(None, "") with ((Option[File], String) => DynVer) {
-  override def apply(wd: Option[File]) = apply(wd, separator, vTagPrefix)
+object DynVer extends DynVer(None) with (Option[File] => DynVer) {
+  override def apply(wd: Option[File]) = apply(wd, separator, prefix)
 }
 
 object `package`
